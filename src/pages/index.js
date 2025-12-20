@@ -8,6 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  CartesianGrid,
 } from "recharts";
 import { FiEdit, FiTrash2 } from "react-icons/fi";
 
@@ -32,8 +33,7 @@ export default function DashboardPage() {
 
   const selectPerson = (p) => {
     setSelectedPerson(p);
-    const savedTasks =
-      JSON.parse(localStorage.getItem("tasks_" + p.id)) || [];
+    const savedTasks = JSON.parse(localStorage.getItem("tasks_" + p.id)) || [];
     setTasks(savedTasks);
   };
 
@@ -53,10 +53,7 @@ export default function DashboardPage() {
   const saveTasks = (list) => {
     setTasks(list);
     if (selectedPerson) {
-      localStorage.setItem(
-        "tasks_" + selectedPerson.id,
-        JSON.stringify(list)
-      );
+      localStorage.setItem("tasks_" + selectedPerson.id, JSON.stringify(list));
     }
   };
 
@@ -111,9 +108,7 @@ export default function DashboardPage() {
 
   const updateTask = (id, updates) => {
     if (!checkAdmin()) return;
-    saveTasks(
-      tasks.map((t) => (t.id === id ? { ...t, ...updates } : t))
-    );
+    saveTasks(tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)));
   };
 
   const deleteTask = (id) => {
@@ -192,7 +187,11 @@ export default function DashboardPage() {
             {/* Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <StatBox title="Total Tasks" value={tasks.length} />
-              <StatBox title="Completed" value={completed} color="text-green-600" />
+              <StatBox
+                title="Completed"
+                value={completed}
+                color="text-green-600"
+              />
               <StatBox title="Pending" value={pending} color="text-red-600" />
               <StatBox title="Late" value={late} color="text-yellow-600" />
             </div>
@@ -206,21 +205,29 @@ export default function DashboardPage() {
                     <div
                       key={p.id}
                       onClick={() => selectPerson(p)}
-                      className={`border rounded p-2 flex justify-between items-center cursor-pointer ${
-                        selectedPerson.id === p.id ? "bg-blue-50" : ""
+                      className={`border rounded p-2 flex justify-between items-center cursor-pointer transition-all duration-300 ${
+                        selectedPerson.id === p.id
+                          ? "border-2 border-blue-800 shadow-lg shadow-blue-500/50"
+                          : "border border-gray-300"
                       }`}
                     >
                       <span>{p.name}</span>
                       <div className="flex gap-2">
-                        <FiEdit color="blue" onClick={(e) => editPerson(p, e)} />
-                        <FiTrash2 color="red" onClick={(e) => deletePerson(p, e)} />
+                        <FiEdit
+                          color="blue"
+                          onClick={(e) => editPerson(p, e)}
+                        />
+                        <FiTrash2
+                          color="red"
+                          onClick={(e) => deletePerson(p, e)}
+                        />
                       </div>
                     </div>
                   ))}
                 </div>
               </Card>
 
-              {/* Graph */}
+            {/* Graph */}
               <Card title="Progress">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={barData}>
@@ -246,7 +253,7 @@ export default function DashboardPage() {
               </Card>
 
               {/* Tasks */}
-              <Card title="Tasks">
+              <Card title={` Task • ${selectedPerson.name}`}>
                 <div className="space-y-3 max-h-72 overflow-auto">
                   {tasks.map((t) => (
                     <div key={t.id} className="border p-3 rounded">
