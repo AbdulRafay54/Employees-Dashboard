@@ -1,6 +1,15 @@
 "use client";
 import { useState, useEffect } from "react";
 import {
+  collection,
+  addDoc,
+  getDocs,
+  doc,
+  updateDoc,
+} from "firebase/firestore";
+import { db } from "@/firebase";
+
+import {
   BarChart,
   Bar,
   XAxis,
@@ -13,6 +22,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { FiEdit2, FiTrash2 } from "react-icons/fi";
+import Swal from "sweetalert2";
 
 const adminPin = "1234";
 
@@ -32,28 +42,51 @@ export default function DashboardPage() {
   const [monthFilter, setMonthFilter] = useState("all");
 
   useEffect(() => {
-    const savedPeople = JSON.parse(localStorage.getItem("people")) || [];
-    setPeople(savedPeople);
-    if (savedPeople.length > 0) selectPerson(savedPeople[0]);
+    const fetchEmployees = async () => {
+      const snapshot = await getDocs(collection(db, "employees"));
+      const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setPeople(list);
+      if (list.length > 0) selectPerson(list[0]);
+    };
+    fetchEmployees();
   }, []);
 
-  const selectPerson = (p) => {
+  const selectPerson = async (p) => {
     setSelectedPerson(p);
-    const savedTasks = JSON.parse(localStorage.getItem("tasks_" + p.id)) || [];
-    setEmails(JSON.parse(localStorage.getItem("emails_" + p.id)) || []);
-    setTasks(savedTasks);
+
+   
+    setEmails(p.emails || []);
+
+    
+    const tasksSnapshot = await getDocs(
+      collection(db, "employees", p.id, "tasks")
+    );
+    const tasksList = tasksSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    setTasks(tasksList);
   };
 
-  const saveEmails = (list) => {
-    setEmails(list);
-    if (selectedPerson) {
-      localStorage.setItem("emails_" + selectedPerson.id, JSON.stringify(list));
-    }
+  const saveEmails = async (list) => {
+    if (!selectedPerson) return;
+
+    await updateDoc(doc(db, "employees", selectedPerson.id), {
+      emails: list,
+    });
+
+    setEmails(list); 
+    setEmails(list); 
+    setSelectedPerson({ ...selectedPerson, emails: list });
+    if (list.length > 0) setSelectedEmail(list[list.length - 1]);
   };
 
   const checkAdmin = () => {
     if (prompt("Admin PIN") !== adminPin) {
-      alert("Only admin can perform this action");
+      Swal.fire({
+        icon: "error",
+        title: "Only admin can perform this action...",
+      });
       return false;
     }
     return true;
@@ -74,29 +107,66 @@ export default function DashboardPage() {
   const isExpired = (t) =>
     !t.completed && new Date(t.submissionDate) < new Date();
 
-  const addPerson = () => {
+  const addPerson = async () => {
     if (!name.trim() || !checkAdmin()) return;
-    const newPerson = { id: Date.now(), name };
-    savePeople([...people, newPerson]);
+
+    const ref = await addDoc(collection(db, "employees"), {
+      name,
+      emails: [],
+    });
+
+    // 🔹 Firestore se fresh list fetch karo
+    const snapshot = await getDocs(collection(db, "employees"));
+    const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setPeople(list);
+
+    const newPerson = list.find((emp) => emp.id === ref.id);
+    setSelectedPerson(newPerson);
+    setEmails(newPerson.emails || []);
+
     setName("");
-    selectPerson(newPerson);
+    setTasks([]);
+
+    Swal.fire({ icon: "success", title: "Employee Added" });
+
+    setTasks([]);
+    setEmails([]);
   };
 
-  const addTask = () => {
+  const addTask = async () => {
     if (!taskName || !submissionDate || !checkAdmin()) return;
-    saveTasks([
-      ...tasks,
+
+    const ref = await addDoc(
+      collection(db, "employees", selectedPerson.id, "tasks"),
       {
-        id: Date.now(),
         name: taskName,
         description: taskDesc,
         submissionDate,
         completed: false,
         late: false,
-        showMore: false,
+        email: selectedEmail,
+        createdAt: Date.now(),
+      }
+    );
+
+    setTasks([
+      ...tasks,
+      {
+        id: ref.id,
+        name: taskName,
+        description: taskDesc,
+        submissionDate,
+        completed: false,
+        late: false,
         email: selectedEmail,
       },
     ]);
+
+    Swal.fire({
+      icon: "success",
+      title: "Task Assigned",
+    });
+
     setTaskName("");
     setTaskDesc("");
     setSubmissionDate("");
@@ -109,7 +179,28 @@ export default function DashboardPage() {
 
   const deleteTask = (id) => {
     if (!checkAdmin()) return;
-    saveTasks(tasks.filter((t) => t.id !== id));
+
+    Swal.fire({
+      title: "Are you sure?",
+      text: "This task will be permanently deleted!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#dc2626",
+      cancelButtonColor: "#6b7280",
+      confirmButtonText: "Yes, delete it",
+    }).then((result) => {
+      if (result.isConfirmed) {
+        saveTasks(tasks.filter((t) => t.id !== id));
+
+        Swal.fire({
+          icon: "success",
+          title: "Deleted!",
+          text: "Task has been deleted successfully.",
+          timer: 1200,
+          showConfirmButton: false,
+        });
+      }
+    });
   };
 
   const deleteStudent = (id) => {
@@ -157,36 +248,64 @@ export default function DashboardPage() {
   const progressPercent =
     tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100);
 
+  const meterData = [
+    { name: "Progress", value: progressPercent },
+    { name: "Remaining", value: 100 - progressPercent },
+  ];
+
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
-          Student Task Dashboard
+          Employee Task Dashboard
         </h1>
 
-        {/* 🔹 Add Student + Empty half (ONLY CHANGE HERE) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card title="Add Student">
-            <div className="flex gap-2">
-              <input
-                className="border p-2 rounded w-full"
-                placeholder="Student name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <button
-                onClick={addPerson}
-                className="bg-blue-600 text-white px-4 rounded"
-              >
-                Add
-              </button>
+          <Card title="Add Employee">
+            <div className="space-y-3">
+              {/* Add Employee */}
+              <div className="flex gap-2">
+                <input
+                  className="border p-2 rounded w-full"
+                  placeholder="Employee name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <button
+                  onClick={addPerson}
+                  className="bg-blue-600 text-white px-4 rounded"
+                >
+                  Add
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <input
+                  className="border p-2 rounded w-full"
+                  placeholder="Add email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+                <button
+                  onClick={() => {
+                    if (!checkAdmin()) return;
+                    saveEmails([...emails, newEmail]);
+                    setNewEmail("");
+                  }}
+                  className="bg-blue-600 text-white w-full py-2 rounded"
+                >
+                  Add Email
+                </button>
+              </div>
             </div>
           </Card>
 
           <Card title="Filter & Score">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3">
+              {/* Month Filter */}
               <select
-                className="border p-2 rounded"
+                className="border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
+                 focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 value={monthFilter}
                 onChange={(e) => setMonthFilter(e.target.value)}
               >
@@ -200,11 +319,34 @@ export default function DashboardPage() {
                 ))}
               </select>
 
-              <div
-                className="w-24 h-24 rounded-full border-8 border-yellow-400
-                    flex items-center justify-center"
-              >
-                <span className="text-xl font-bold">{progressPercent}%</span>
+              {/* Bike Meter */}
+              <div className="w-full h-36 relative flex items-end justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={meterData}
+                      startAngle={180}
+                      endAngle={0}
+                      cx="50%"
+                      cy="80%"
+                      innerRadius={55}
+                      outerRadius={75}
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      <Cell fill="#22c55e" /> {/* progress */}
+                      <Cell fill="#e5e7eb" /> {/* remaining */}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+
+                {/* Center Text */}
+                <div className="absolute bottom-6 text-center">
+                  <p className="text-3xl font-bold text-gray-800">
+                    {progressPercent}%
+                  </p>
+                  <p className="text-xs text-gray-500">Task Completion</p>
+                </div>
               </div>
             </div>
           </Card>
@@ -251,53 +393,30 @@ export default function DashboardPage() {
                     onClick={addTask}
                     className="bg-blue-600 text-white px-4 py-2 rounded w-full"
                   >
-                    Add Task
+                    Assign Task
                   </button>
                 </div>
               </Card>
 
               <Card title="Student Progress">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                  {/* LEFT: PIE (SAME AS BEFORE) */}
-                  <div className="flex flex-col items-center">
-                    <PieChart width={180} height={180}>
+                <div className="flex justify-center items-center h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
                       <Pie
                         data={barData}
                         dataKey="value"
                         cx="50%"
                         cy="50%"
-                        outerRadius={65}
+                        innerRadius={0}
+                        outerRadius="90%"
+                        paddingAngle={2}
                       >
                         <Cell fill="#16a34a" />
                         <Cell fill="#facc15" />
                         <Cell fill="#dc2626" />
                       </Pie>
                     </PieChart>
-                    <p className="text-sm text-gray-500">Completion</p>
-                    <p className="text-2xl font-bold text-blue-600">
-                      {progressPercent}%
-                    </p>
-                  </div>
-
-                  {/* RIGHT: EMAIL ADD BOX */}
-                  <div className="space-y-2">
-                    <input
-                      className="border p-2 rounded w-full"
-                      placeholder="Add email"
-                      value={newEmail}
-                      onChange={(e) => setNewEmail(e.target.value)}
-                    />
-                    <button
-                      onClick={() => {
-                        if (!checkAdmin()) return;
-                        saveEmails([...emails, newEmail]);
-                        setNewEmail("");
-                      }}
-                      className="bg-blue-600 text-white w-full py-2 rounded"
-                    >
-                      Add Email
-                    </button>
-                  </div>
+                  </ResponsiveContainer>
                 </div>
               </Card>
             </div>
@@ -317,12 +436,12 @@ export default function DashboardPage() {
             {/* Main */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Students */}
-              <Card title="Students">
+              <Card title="Employees">
                 <div className="space-y-2 max-h-72 overflow-auto">
                   {people.map((p) => (
                     <div
                       key={p.id}
-                    className={`border rounded p-2 flex justify-between items-center cursor-pointer transition-all duration-300 ${
+                      className={`border rounded p-2 flex justify-between items-center cursor-pointer transition-all duration-300 ${
                         selectedPerson.id === p.id
                           ? "border-2 border-blue-800 shadow-lg shadow-blue-500/50"
                           : "border border-gray-300"
@@ -379,85 +498,84 @@ export default function DashboardPage() {
               </Card>
 
               {/* Tasks */}
-             <Card title={`Tasks • ${selectedPerson.name}`}>
-  <div className="space-y-3 max-h-72 overflow-auto">
-    {tasks.map((t) => {
-      const expired = isExpired(t);
+              <Card title={`Assigned Tasks • ${selectedPerson.name}`}>
+                <div className="space-y-3 max-h-72 overflow-auto">
+                  {tasks.map((t) => {
+                    const expired = isExpired(t);
 
-      return (
-        <div key={t.id} className="border p-3 rounded">
-          <p className="font-medium">{t.name}</p>
-          <p className="text-sm text-gray-500">
-            Due: {t.submissionDate}
-          </p>
+                    return (
+                      <div key={t.id} className="border p-3 rounded">
+                        <p className="font-medium">{t.name}</p>
+                        <p className="text-sm text-gray-500">
+                          Due: {t.submissionDate}
+                        </p>
 
-          {/* STATUS */}
-          <p
-            className={`text-sm font-medium mt-1 ${
-              t.completed
-                ? t.late
-                  ? "text-yellow-600"
-                  : "text-green-600"
-                : expired
-                ? "text-red-600"
-                : "text-gray-700"
-            }`}
-          >
-            {t.completed
-              ? t.late
-                ? "Late Submitted"
-                : "Completed"
-              : expired
-              ? "Deadline Missed"
-              : "Pending"}
-          </p>
+                        {/* STATUS */}
+                        <p
+                          className={`text-sm font-medium mt-1 ${
+                            t.completed
+                              ? t.late
+                                ? "text-yellow-600"
+                                : "text-green-600"
+                              : expired
+                              ? "text-red-600"
+                              : "text-gray-700"
+                          }`}
+                        >
+                          {t.completed
+                            ? t.late
+                              ? "Late Submitted"
+                              : "Completed"
+                            : expired
+                            ? "Deadline Missed"
+                            : "Pending"}
+                        </p>
 
-          {/* ACTIONS */}
-          <div className="flex items-center mt-2 gap-2">
-            {!t.completed && (
-              <select
-                className="border p-1 rounded text-sm"
-                defaultValue=""
-                onChange={(e) => {
-                  if (e.target.value === "done") {
-                    updateTask(t.id, {
-                      completed: true,
-                      late: false,
-                    });
-                  }
-                  if (e.target.value === "late") {
-                    updateTask(t.id, {
-                      completed: true,
-                      late: true,
-                    });
-                  }
-                }}
-              >
-                <option value="">Action</option>
+                        {/* ACTIONS */}
+                        <div className="flex items-center mt-2 gap-2">
+                          {!t.completed && (
+                            <select
+                              className="border p-1 rounded text-sm"
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (e.target.value === "done") {
+                                  updateTask(t.id, {
+                                    completed: true,
+                                    late: false,
+                                  });
+                                }
+                                if (e.target.value === "late") {
+                                  updateTask(t.id, {
+                                    completed: true,
+                                    late: true,
+                                  });
+                                }
+                              }}
+                            >
+                              <option value="">Action</option>
 
-                {!expired && (
-                  <option value="done">Mark Completed</option>
-                )}
+                              {!expired && (
+                                <option value="done">Mark Completed</option>
+                              )}
 
-                {expired && (
-                  <option value="late">Submit (Late)</option>
-                )}
-              </select>
-            )}
+                              {expired && (
+                                <option value="late">Submit (Late)</option>
+                              )}
+                            </select>
+                          )}
 
-            <button
-              onClick={() => deleteTask(t.id)}
-              className="ml-auto text-red-600"
-            >
-              <FiTrash2 />
-            </button>
-          </div>
-        </div>
-      );
-    })}
-  </div>
-</Card>
-
+                          <button
+                            onClick={() => deleteTask(t.id)}
+                            className="ml-auto text-red-600"
+                          >
+                            <FiTrash2 />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
             </div>
           </>
         )}
