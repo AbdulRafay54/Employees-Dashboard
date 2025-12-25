@@ -40,7 +40,9 @@ export default function DashboardPage() {
   const [emails, setEmails] = useState([]);
   const [newEmail, setNewEmail] = useState("");
   const [selectedEmail, setSelectedEmail] = useState("");
-  const [monthFilter, setMonthFilter] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [filteredTasks, setFilteredTasks] = useState([]);
 
   useEffect(() => {
     const fetchEmployees = async () => {
@@ -54,8 +56,7 @@ export default function DashboardPage() {
 
   const selectPerson = async (p) => {
     setSelectedPerson(p);
-
-    setEmails(p.emails || []);
+    setEmails(p.emails || []); // yahi emails ko UI me show karenge
 
     const tasksSnapshot = await getDocs(
       collection(db, "employees", p.id, "tasks")
@@ -66,6 +67,23 @@ export default function DashboardPage() {
     }));
     setTasks(tasksList);
   };
+
+  useEffect(() => {
+    if (!tasks) return;
+
+    const from = fromDate ? new Date(fromDate) : null;
+    const to = toDate ? new Date(toDate) : null;
+
+    const filtered = tasks.filter((t) => {
+      const taskDate = new Date(t.submissionDate);
+      if (from && to) return taskDate >= from && taskDate <= to;
+      if (from) return taskDate >= from;
+      if (to) return taskDate <= to;
+      return true; // no filter applied
+    });
+
+    setFilteredTasks(filtered);
+  }, [tasks, fromDate, toDate]);
 
   const saveEmails = async (list) => {
     if (!selectedPerson) return;
@@ -81,31 +99,25 @@ export default function DashboardPage() {
   };
 
   const checkAdmin = async () => {
-  const { value: pin } = await Swal.fire({
-    title: "Enter Admin PIN",
-    input: "password",
-    inputLabel: "Admin PIN",
-    inputPlaceholder: "Enter PIN",
-    inputAttributes: {
-      maxlength: 10,
-      autocapitalize: "off",
-      autocorrect: "off"
-    }
-  });
-  if (pin !== adminPin) {
-    Swal.fire({
-      icon: "error",
-      title: "Only admin can perform this action...",
+    const { value: pin } = await Swal.fire({
+      title: "Enter Admin PIN",
+      input: "password",
+      inputLabel: "Admin PIN",
+      inputPlaceholder: "Enter PIN",
+      inputAttributes: {
+        maxlength: 10,
+        autocapitalize: "off",
+        autocorrect: "off",
+      },
     });
-    return false;
-  }
-  return true;
-};
-
-
-  const savePeople = (list) => {
-    setPeople(list);
-    localStorage.setItem("people", JSON.stringify(list));
+    if (pin !== adminPin) {
+      Swal.fire({
+        icon: "error",
+        title: "Only admin can perform this action...",
+      });
+      return false;
+    }
+    return true;
   };
 
   const saveTasks = (list) => {
@@ -119,29 +131,41 @@ export default function DashboardPage() {
     !t.completed && new Date(t.submissionDate) < new Date();
 
   const addPerson = async () => {
-    if (!name.trim() || !checkAdmin()) return;
+    if (!(await checkAdmin())) return;
+    if (!name.trim()) return;
 
-    const ref = await addDoc(collection(db, "employees"), {
+    // 🔍 Duplicate check
+    const alreadyExists = people.some(
+      (p) => p.name.toLowerCase() === name.toLowerCase()
+    );
+
+    if (alreadyExists) {
+      Swal.fire({
+        icon: "error",
+        title: "Employee already exists",
+        text: `Employee "${name}" pehle se mojood hai`,
+      });
+      return;
+    }
+
+    await addDoc(collection(db, "employees"), {
       name,
       emails: [],
     });
 
-  
     const snapshot = await getDocs(collection(db, "employees"));
-    const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const list = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
     setPeople(list);
-
-    const newPerson = list.find((emp) => emp.id === ref.id);
-    setSelectedPerson(newPerson);
-    setEmails(newPerson.emails || []);
-
     setName("");
-    setTasks([]);
 
-    Swal.fire({ icon: "success", title: "Employee Added" });
-
-    setTasks([]);
-    setEmails([]);
+    Swal.fire({
+      icon: "success",
+      title: "Employee Added",
+    });
   };
 
   const addTask = async () => {
@@ -183,107 +207,105 @@ export default function DashboardPage() {
     setSubmissionDate("");
   };
 
-  const updateTask = (id, updates) => {
-    if (!checkAdmin()) return;
-    saveTasks(tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+  const updateTask = async (id, updates) => {
+    if (!(await checkAdmin())) return; // Admin check
+
+    const updatedTasks = tasks.map((t) =>
+      t.id === id ? { ...t, ...updates } : t
+    );
+    setTasks(updatedTasks);
+
+    const taskRef = doc(db, "employees", selectedPerson.id, "tasks", id);
+    await updateDoc(taskRef, updates);
   };
 
   const deleteTask = async (id) => {
-  const isAdmin = await checkAdmin();
-  if (!isAdmin) return;
+    const isAdmin = await checkAdmin();
+    if (!isAdmin) return;
 
-  Swal.fire({
-    title: "Are you sure?",
-    text: "This task will be permanently deleted!",
-    icon: "warning",
-    showCancelButton: true,
-    confirmButtonColor: "#dc2626",
-    cancelButtonColor: "#6b7280",
-    confirmButtonText: "Yes, delete it",
-  }).then((result) => {
-    if (result.isConfirmed) {
-      saveTasks(tasks.filter((t) => t.id !== id));
+    Swal.fire({
+      title: "Are you sure?",
+      text: "This task will be permanently deleted!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#dc2626",
+      cancelButtonColor: "#6b7280",
+      confirmButtonText: "Yes, delete it",
+    }).then((result) => {
+      if (result.isConfirmed) {
+        saveTasks(tasks.filter((t) => t.id !== id));
+        Swal.fire({
+          icon: "success",
+          title: "Deleted!",
+          text: "Task has been deleted successfully.",
+          timer: 1200,
+          showConfirmButton: false,
+        });
+      }
+    });
+  };
+
+  const deleteStudent = async (id) => {
+    const isAdmin = await checkAdmin();
+    if (!isAdmin) return;
+
+    await deleteDoc(doc(db, "employees", id));
+
+    const snapshot = await getDocs(collection(db, "employees"));
+    const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    setPeople(list);
+
+    if (selectedPerson?.id === id) {
+      setSelectedPerson(list[0] || null);
+      setTasks([]);
+    }
+
+    Swal.fire({ icon: "success", title: "Employee Deleted" });
+  };
+
+  const editStudent = async (id) => {
+    if (!(await checkAdmin())) return;
+
+    const { value: newName } = await Swal.fire({
+      title: "Edit Employee Name",
+      input: "text",
+      inputLabel: "New Name",
+      inputPlaceholder: "Enter new name",
+      inputValue: people.find((p) => p.id === id)?.name || "",
+      showCancelButton: true,
+    });
+
+    if (!newName) return;
+
+    try {
+      const studentRef = doc(db, "employees", id);
+      await updateDoc(studentRef, { name: newName });
+
+      const updated = people.map((p) =>
+        p.id === id ? { ...p, name: newName } : p
+      );
+      setPeople(updated);
+
+      if (selectedPerson?.id === id) {
+        setSelectedPerson({ ...selectedPerson, name: newName });
+      }
+
       Swal.fire({
         icon: "success",
-        title: "Deleted!",
-        text: "Task has been deleted successfully.",
+        title: "Employee name updated!",
+        text: `Name has been changed to "${newName}"`,
         timer: 1200,
         showConfirmButton: false,
       });
+    } catch (err) {
+      console.error(err);
+      Swal.fire({
+        icon: "error",
+        title: "Oops!",
+        text: "Something went wrong while updating.",
+      });
     }
-  });
-};
-
-
- 
-const deleteStudent = async (id) => {
-  const isAdmin = await checkAdmin();
-  if (!isAdmin) return;
-
-  
-  await deleteDoc(doc(db, "employees", id));
-
-  
-  const snapshot = await getDocs(collection(db, "employees"));
-  const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-  setPeople(list);
-
- 
-  if (selectedPerson?.id === id) {
-    setSelectedPerson(list[0] || null);
-    setTasks([]);
-  }
-
-  Swal.fire({ icon: "success", title: "Employee Deleted" });
-};
-
-  const editStudent = async (id) => {
-  if (!await checkAdmin()) return; 
-
-  const { value: newName } = await Swal.fire({
-    title: "Edit Employee Name",
-    input: "text",
-    inputLabel: "New Name",
-    inputPlaceholder: "Enter new name",
-    inputValue: people.find(p => p.id === id)?.name || "",
-    showCancelButton: true,
-  });
-
-  if (!newName) return;
-
-  try {
-    
-    const studentRef = doc(db, "employees", id);
-    await updateDoc(studentRef, { name: newName });
-
-    
-    const updated = people.map((p) =>
-      p.id === id ? { ...p, name: newName } : p
-    );
-    setPeople(updated);
-
-    if (selectedPerson?.id === id) {
-      setSelectedPerson({ ...selectedPerson, name: newName });
-    }
-
-    
-    Swal.fire({
-      icon: "success",
-      title: "Employee name updated!",
-      text: `Name has been changed to "${newName}"`,
-      timer: 1200,
-      showConfirmButton: false,
-    });
-  } catch (err) {
-    console.error(err);
-    Swal.fire({
-      icon: "error",
-      title: "Oops!",
-      text: "Something went wrong while updating.",
-    });
-  }
-};
-
+  };
 
   const completed = tasks.filter((t) => t.completed && !t.late).length;
   const late = tasks.filter((t) => t.completed && t.late).length;
@@ -309,46 +331,44 @@ const deleteStudent = async (id) => {
           Employee Task Dashboard
         </h1>
 
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-         <Card title="Add Employee">
-  <div className="space-y-3">
-     
-    <div className="flex gap-2">
-      <input
-        className="border p-2 rounded w-full"
-        placeholder="Employee name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <button
-        onClick={addPerson}
-        className="bg-blue-600 text-white px-4 rounded"
-      >
-        Add
-      </button>
-    </div>
+          <Card title="Add Employee">
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  className="border p-2 rounded w-full"
+                  placeholder="Employee name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <button
+                  onClick={addPerson}
+                  className="bg-blue-600 text-white px-4 rounded"
+                >
+                  Add
+                </button>
+              </div>
 
-    <div className="flex gap-2">
-      <input
-        className="border p-2 rounded w-full"
-        placeholder="Add email"
-        value={newEmail}
-        onChange={(e) => setNewEmail(e.target.value)}
-      />
-      <button
-        onClick={() => {
-          if (!checkAdmin()) return;
-          saveEmails([...emails, newEmail]);
-          setNewEmail("");
-        }}
-        className="bg-blue-600 text-white px-4 rounded"
-      >
-       Mail
-      </button>
-    </div>
-  </div>
-</Card>
+              <div className="flex gap-2">
+                <input
+                  className="border p-2 rounded w-full"
+                  placeholder="Add email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+                <button
+                  onClick={() => {
+                    if (!checkAdmin()) return;
+                    saveEmails([...emails, newEmail]);
+                    setNewEmail("");
+                  }}
+                  className="bg-blue-600 text-white px-4 rounded"
+                >
+                  Mail
+                </button>
+              </div>
+            </div>
+          </Card>
 
           {selectedPerson && (
             <Card title={`Add Task • ${selectedPerson.name}`}>
@@ -408,29 +428,30 @@ const deleteStudent = async (id) => {
           </div>
         )}
 
-        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card title="Filter & Score">
             <div className="flex flex-col gap-3">
-              {/* Month Filter */}
-              <select
-                className="border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
-                 focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                value={monthFilter}
-                onChange={(e) => setMonthFilter(e.target.value)}
-              >
-                <option value="all">All Months</option>
-                {[...Array(12)].map((_, i) => (
-                  <option key={i} value={i}>
-                    {new Date(0, i).toLocaleString("default", {
-                      month: "short",
-                    })}
-                  </option>
-                ))}
-              </select>
+              {/* Date Range Filter */}
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
+        focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                />
+
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
+        focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                />
+              </div>
 
               {/* Bike Meter */}
-              <div className="w-full h-36 relative flex items-end justify-center">
+              <div className="w-full h-36 relative top-6 flex items-end justify-center">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -444,13 +465,12 @@ const deleteStudent = async (id) => {
                       dataKey="value"
                       stroke="none"
                     >
-                      <Cell fill="#22c55e" /> {/* progress */}
-                      <Cell fill="#e5e7eb" /> {/* remaining */}
+                      <Cell fill="#22c55e" />
+                      <Cell fill="#e5e7eb" />
                     </Pie>
                   </PieChart>
                 </ResponsiveContainer>
 
-                {/* Center Text */}
                 <div className="absolute bottom-12 text-center">
                   <p className="text-3xl font-bold text-gray-800">
                     {progressPercent}%
@@ -485,7 +505,6 @@ const deleteStudent = async (id) => {
           )}
         </div>
 
-        
         {selectedPerson && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 min-h-[340px] items-stretch">
             {/* Students */}
@@ -553,80 +572,81 @@ const deleteStudent = async (id) => {
             {/* Tasks */}
             <Card title={`Assigned Tasks • ${selectedPerson.name}`}>
               <div className="space-y-3 max-h-72 overflow-auto">
-                {tasks.map((t) => {
-                  const expired = isExpired(t);
-
-                  return (
-                    <div key={t.id} className="border p-3 rounded">
-                      <p className="font-medium">{t.name}</p>
-                      <p className="text-sm text-gray-500">
-                        Due: {t.submissionDate}
-                      </p>
-
-                      {/* STATUS */}
-                      <p
-                        className={`text-sm font-medium mt-1 ${
-                          t.completed
-                            ? t.late
-                              ? "text-yellow-600"
-                              : "text-green-600"
-                            : expired
-                            ? "text-red-600" 
-                            : "text-red-400" 
-                        }`}
-                      >
-                        {t.completed
-                          ? t.late
-                            ? "Late Submitted"
-                            : "Completed"
-                          : expired
-                          ? "Deadline Missed"
-                          : "Pending"}
-                      </p>
-
-                      {/* ACTIONS */}
-                      <div className="flex items-center mt-2 gap-2">
-                        {!t.completed && (
-                          <select
-                            className="border p-1 rounded text-sm"
-                            defaultValue=""
-                            onChange={(e) => {
-                              if (e.target.value === "done") {
-                                updateTask(t.id, {
-                                  completed: true,
-                                  late: false,
-                                });
-                              }
-                              if (e.target.value === "late") {
-                                updateTask(t.id, {
-                                  completed: true,
-                                  late: true,
-                                });
-                              }
-                            }}
-                          >
-                            <option value="">Action</option>
-
-                            {!expired && (
-                              <option value="done">Mark Completed</option>
-                            )}
-
-                            {expired && (
-                              <option value="late">Submit (Late)</option>
-                            )}
-                          </select>
-                        )}
-
-                        <button
-                          onClick={() => deleteTask(t.id)}
-                          className="ml-auto text-red-600"
+                {filteredTasks.length === 0 ? (
+                  <p className="text-center text-gray-500">
+                    No tasks found for selected date range
+                  </p>
+                ) : (
+                  filteredTasks.map((t) => {
+                    const expired = isExpired(t);
+                    return (
+                      <div key={t.id} className="border p-3 rounded">
+                        <p className="font-medium">{t.name}</p>
+                        <p className="text-sm text-gray-500">
+                          Due: {t.submissionDate}
+                        </p>
+                        <p
+                          className={`text-sm font-medium mt-1 ${
+                            t.completed
+                              ? t.late
+                                ? "text-yellow-600"
+                                : "text-green-600"
+                              : expired
+                              ? "text-red-600"
+                              : "text-red-400"
+                          }`}
                         >
-                          <FiTrash2 />
-                        </button>
+                          {t.completed
+                            ? t.late
+                              ? "Late Submitted"
+                              : "Completed"
+                            : expired
+                            ? "Deadline Missed"
+                            : "Pending"}
+                        </p>
+
+                        {/* ACTIONS */}
+                        <div className="flex items-center mt-2 gap-2">
+                          {!t.completed && (
+                            <select
+                              className="border p-1 rounded text-sm"
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (e.target.value === "done") {
+                                  updateTask(t.id, {
+                                    completed: true,
+                                    late: false,
+                                  });
+                                }
+                                if (e.target.value === "late") {
+                                  updateTask(t.id, {
+                                    completed: true,
+                                    late: true,
+                                  });
+                                }
+                              }}
+                            >
+                              <option value="">Action</option>
+                              {!expired && (
+                                <option value="done">Mark Completed</option>
+                              )}
+                              {expired && (
+                                <option value="late">Submit (Late)</option>
+                              )}
+                            </select>
+                          )}
+
+                          <button
+                            onClick={() => deleteTask(t.id)}
+                            className="ml-auto text-red-600"
+                          >
+                            <FiTrash2 />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </Card>
           </div>
