@@ -69,21 +69,21 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    if (!tasks) return;
+  if (!tasks || tasks.length === 0) return;
 
-    const from = fromDate ? new Date(fromDate) : null;
-    const to = toDate ? new Date(toDate) : null;
+  const from = fromDate ? new Date(fromDate) : null;
+  const to = toDate ? new Date(toDate) : null;
 
-    const filtered = tasks.filter((t) => {
-      const taskDate = new Date(t.submissionDate);
-      if (from && to) return taskDate >= from && taskDate <= to;
-      if (from) return taskDate >= from;
-      if (to) return taskDate <= to;
-      return true; // no filter applied
-    });
+  const filtered = tasks.filter((t) => {
+    const taskDate = new Date(t.submissionDate + "T00:00:00");
+    if (from && to) return taskDate >= from && taskDate <= to;
+    if (from) return taskDate >= from;
+    if (to) return taskDate <= to;
+    return true;
+  });
 
-    setFilteredTasks(filtered);
-  }, [tasks, fromDate, toDate]);
+  setFilteredTasks(filtered);
+}, [tasks, fromDate, toDate]);
 
   const saveEmails = async (list) => {
     if (!selectedPerson) return;
