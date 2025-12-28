@@ -24,6 +24,12 @@ import {
 } from "recharts";
 import { FiEdit2, FiTrash2 } from "react-icons/fi";
 import Swal from "sweetalert2";
+import {
+  GaugeContainer,
+  GaugeReferenceArc,
+  GaugeValueArc,
+  useGaugeState,
+} from "@mui/x-charts/Gauge";
 
 const adminPin = "1234";
 
@@ -56,34 +62,23 @@ export default function DashboardPage() {
 
   const selectPerson = async (p) => {
     setSelectedPerson(p);
-    setEmails(p.emails || []); // yahi emails ko UI me show karenge
+    setEmails(p.emails || []);
+
+    setTasks([]);
+    setFilteredTasks([]);
 
     const tasksSnapshot = await getDocs(
       collection(db, "employees", p.id, "tasks")
     );
+
     const tasksList = tasksSnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
+
     setTasks(tasksList);
+    setFilteredTasks(tasksList);
   };
-
-  useEffect(() => {
-  if (!tasks || tasks.length === 0) return;
-
-  const from = fromDate ? new Date(fromDate) : null;
-  const to = toDate ? new Date(toDate) : null;
-
-  const filtered = tasks.filter((t) => {
-    const taskDate = new Date(t.submissionDate + "T00:00:00");
-    if (from && to) return taskDate >= from && taskDate <= to;
-    if (from) return taskDate >= from;
-    if (to) return taskDate <= to;
-    return true;
-  });
-
-  setFilteredTasks(filtered);
-}, [tasks, fromDate, toDate]);
 
   const saveEmails = async (list) => {
     if (!selectedPerson) return;
@@ -134,33 +129,51 @@ export default function DashboardPage() {
     if (!(await checkAdmin())) return;
     if (!name.trim()) return;
 
-    // 🔍 Duplicate check
-    const alreadyExists = people.some(
-      (p) => p.name.toLowerCase() === name.toLowerCase()
-    );
+    const cleanName = name.trim();
+    const lowerName = cleanName.toLowerCase();
+
+    const snapshot = await getDocs(collection(db, "employees"));
+
+    const alreadyExists = snapshot.docs.some((doc) => {
+      const data = doc.data();
+      return data.nameLower
+        ? data.nameLower === lowerName
+        : data.name?.toLowerCase() === lowerName;
+    });
 
     if (alreadyExists) {
       Swal.fire({
         icon: "error",
         title: "Employee already exists",
-        text: `Employee "${name}" pehle se mojood hai`,
+        text: `"${cleanName}" already exists`,
       });
       return;
     }
 
-    await addDoc(collection(db, "employees"), {
-      name,
+    // ✅ Add employee
+    const docRef = await addDoc(collection(db, "employees"), {
+      name: cleanName,
+      nameLower: lowerName,
       emails: [],
     });
 
-    const snapshot = await getDocs(collection(db, "employees"));
-    const list = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const newPerson = {
+      id: docRef.id,
+      name: cleanName,
+      nameLower: lowerName,
+      emails: [],
+    };
 
-    setPeople(list);
-    setName("");
+    // ✅ Update state properly
+    setPeople((prev) => [...prev, newPerson]);
+    setSelectedPerson(newPerson);
+
+    // ✅ RESET STATES (IMPORTANT)
+    setTasks([]);
+    setFilteredTasks([]);
+    setEmails([]);
+    setSelectedEmail("");
+    setName(""); // 🔥 INPUT CLEAR
 
     Swal.fire({
       icon: "success",
@@ -169,7 +182,10 @@ export default function DashboardPage() {
   };
 
   const addTask = async () => {
-    if (!taskName || !submissionDate || !checkAdmin()) return;
+    if (!taskName || !submissionDate) return;
+
+    const isAdmin = await checkAdmin();
+    if (!isAdmin) return;
 
     const ref = await addDoc(
       collection(db, "employees", selectedPerson.id, "tasks"),
@@ -219,11 +235,11 @@ export default function DashboardPage() {
     await updateDoc(taskRef, updates);
   };
 
-  const deleteTask = async (id) => {
+  const deleteTask = async (taskId) => {
     const isAdmin = await checkAdmin();
     if (!isAdmin) return;
 
-    Swal.fire({
+    const confirm = await Swal.fire({
       title: "Are you sure?",
       text: "This task will be permanently deleted!",
       icon: "warning",
@@ -231,17 +247,22 @@ export default function DashboardPage() {
       confirmButtonColor: "#dc2626",
       cancelButtonColor: "#6b7280",
       confirmButtonText: "Yes, delete it",
-    }).then((result) => {
-      if (result.isConfirmed) {
-        saveTasks(tasks.filter((t) => t.id !== id));
-        Swal.fire({
-          icon: "success",
-          title: "Deleted!",
-          text: "Task has been deleted successfully.",
-          timer: 1200,
-          showConfirmButton: false,
-        });
-      }
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    // 🔥 FIREBASE DELETE
+    await deleteDoc(doc(db, "employees", selectedPerson.id, "tasks", taskId));
+
+    // 🔄 UI update
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setFilteredTasks((prev) => prev.filter((t) => t.id !== taskId));
+
+    Swal.fire({
+      icon: "success",
+      title: "Task Deleted",
+      timer: 1200,
+      showConfirmButton: false,
     });
   };
 
@@ -324,6 +345,30 @@ export default function DashboardPage() {
     { name: "Progress", value: progressPercent },
     { name: "Remaining", value: 100 - progressPercent },
   ];
+
+  function GaugePointer() {
+    const { valueAngle, outerRadius, cx, cy } = useGaugeState();
+
+    if (valueAngle === null) {
+      // No value to display
+      return null;
+    }
+
+    const target = {
+      x: cx + outerRadius * Math.sin(valueAngle),
+      y: cy - outerRadius * Math.cos(valueAngle),
+    };
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={5} fill="red" />
+        <path
+          d={`M ${cx} ${cy} L ${target.x} ${target.y}`}
+          stroke="red"
+          strokeWidth={3}
+        />
+      </g>
+    );
+  }
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -357,10 +402,38 @@ export default function DashboardPage() {
                   onChange={(e) => setNewEmail(e.target.value)}
                 />
                 <button
-                  onClick={() => {
-                    if (!checkAdmin()) return;
-                    saveEmails([...emails, newEmail]);
+                  onClick={async () => {
+                    if (!newEmail.trim()) return;
+
+                    const isAdmin = await checkAdmin();
+                    if (!isAdmin) return;
+
+                    if (emails.includes(newEmail)) {
+                      Swal.fire({
+                        icon: "error",
+                        title: "Email already exists",
+                      });
+                      return;
+                    }
+
+                    const updatedEmails = [...emails, newEmail];
+
+                    await updateDoc(doc(db, "employees", selectedPerson.id), {
+                      emails: updatedEmails,
+                    });
+
+                    setEmails(updatedEmails);
+                    setSelectedPerson({
+                      ...selectedPerson,
+                      emails: updatedEmails,
+                    });
+
                     setNewEmail("");
+
+                    Swal.fire({
+                      icon: "success",
+                      title: "Email Added",
+                    });
                   }}
                   className="bg-blue-600 text-white px-4 rounded"
                 >
@@ -451,31 +524,31 @@ export default function DashboardPage() {
               </div>
 
               {/* Bike Meter */}
-              <div className="w-full h-36 relative top-6 flex items-end justify-center">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={meterData}
-                      startAngle={180}
-                      endAngle={0}
-                      cx="50%"
-                      cy="60%"
-                      innerRadius={55}
-                      outerRadius={75}
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      <Cell fill="#22c55e" />
-                      <Cell fill="#e5e7eb" />
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-
-                <div className="absolute bottom-12 text-center">
+              <div className="w-full h-36 relative top-1 flex items-end justify-center">
+                <GaugeContainer
+                  width={220}
+                  height={140}
+                  startAngle={-90}
+                  endAngle={90}
+                  value={progressPercent}
+                >
+                  <GaugeReferenceArc
+                    style={{
+                      fill: "#e5e7eb",
+                    }}
+                  />
+                  <GaugeValueArc
+                    style={{
+                      fill: "#22c55e",
+                    }}
+                  />
+                  <GaugePointer />
+                </GaugeContainer>
+                <div className="absolute bottom-8 text-center">
                   <p className="text-3xl font-bold text-gray-800">
                     {progressPercent}%
                   </p>
-                  <p className="text-xs text-gray-500">Task Completion</p>
+                  <p className="text-xs text-gray-500">Task Completed</p>
                 </div>
               </div>
             </div>
