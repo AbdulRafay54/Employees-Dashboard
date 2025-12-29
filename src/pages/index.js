@@ -30,10 +30,13 @@ import {
   GaugeValueArc,
   useGaugeState,
 } from "@mui/x-charts/Gauge";
+import { PieChart as MUIPieChart } from "@mui/x-charts/PieChart";
 
 const adminPin = "1234";
 
 export default function DashboardPage() {
+  const [isAdminMode, setIsAdminMode] = useState(false);
+
   const [people, setPeople] = useState([]);
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [name, setName] = useState("");
@@ -49,6 +52,7 @@ export default function DashboardPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [filteredTasks, setFilteredTasks] = useState([]);
+  const [allEmails, setAllEmails] = useState([]);
 
   useEffect(() => {
     const fetchEmployees = async () => {
@@ -79,6 +83,18 @@ export default function DashboardPage() {
     setTasks(tasksList);
     setFilteredTasks(tasksList);
   };
+
+  useEffect(() => {
+    const fetchEmails = async () => {
+      const snap = await getDocs(collection(db, "emails"));
+      const list = snap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setAllEmails(list);
+    };
+    fetchEmails();
+  }, []);
 
   const saveEmails = async (list) => {
     if (!selectedPerson) return;
@@ -113,6 +129,45 @@ export default function DashboardPage() {
       return false;
     }
     return true;
+  };
+
+  const handleAdminToggle = async () => {
+    if (isAdminMode) {
+      const result = await Swal.fire({
+        title: "Are you sure?",
+        text: "Do you want to disable admin mode?",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Yes, disable",
+        cancelButtonText: "Cancel",
+      });
+
+      if (result.isConfirmed) {
+        setIsAdminMode(false);
+        Swal.fire({ icon: "success", title: "Admin mode disabled" });
+      }
+
+      return;
+    }
+
+    const { value: pin } = await Swal.fire({
+      title: "Enter Admin PIN",
+      input: "password",
+      inputLabel: "Admin PIN",
+      inputPlaceholder: "Enter PIN",
+      inputAttributes: {
+        maxlength: 10,
+        autocapitalize: "off",
+        autocorrect: "off",
+      },
+    });
+
+    if (pin === adminPin) {
+      setIsAdminMode(true);
+      Swal.fire({ icon: "success", title: "Admin mode enabled" });
+    } else {
+      Swal.fire({ icon: "error", title: "Incorrect PIN" });
+    }
   };
 
   const saveTasks = (list) => {
@@ -164,16 +219,14 @@ export default function DashboardPage() {
       emails: [],
     };
 
-    // ✅ Update state properly
     setPeople((prev) => [...prev, newPerson]);
     setSelectedPerson(newPerson);
 
-    // ✅ RESET STATES (IMPORTANT)
     setTasks([]);
     setFilteredTasks([]);
     setEmails([]);
     setSelectedEmail("");
-    setName(""); // 🔥 INPUT CLEAR
+    setName("");
 
     Swal.fire({
       icon: "success",
@@ -184,25 +237,23 @@ export default function DashboardPage() {
   const addTask = async () => {
     if (!taskName || !submissionDate) return;
 
-    const isAdmin = await checkAdmin();
     if (!isAdmin) return;
 
-    const ref = await addDoc(
-      collection(db, "employees", selectedPerson.id, "tasks"),
-      {
-        name: taskName,
-        description: taskDesc,
-        submissionDate,
-        completed: false,
-        late: false,
-        email: selectedEmail,
-        createdAt: Date.now(),
-      }
-    );
+    try {
+      const ref = await addDoc(
+        collection(db, "employees", selectedPerson.id, "tasks"),
+        {
+          name: taskName,
+          description: taskDesc,
+          submissionDate,
+          completed: false,
+          late: false,
+          email: selectedEmail,
+          createdAt: Date.now(),
+        }
+      );
 
-    setTasks([
-      ...tasks,
-      {
+      const newTask = {
         id: ref.id,
         name: taskName,
         description: taskDesc,
@@ -210,21 +261,33 @@ export default function DashboardPage() {
         completed: false,
         late: false,
         email: selectedEmail,
-      },
-    ]);
+      };
 
-    Swal.fire({
-      icon: "success",
-      title: "Task Assigned",
-    });
+      setTasks((prev) => [...prev, newTask]);
+      setFilteredTasks((prev) => [...prev, newTask]);
 
-    setTaskName("");
-    setTaskDesc("");
-    setSubmissionDate("");
+      Swal.fire({
+        icon: "success",
+        title: "Task Assigned",
+        timer: 1200,
+        showConfirmButton: false,
+      });
+
+      setTaskName("");
+      setTaskDesc("");
+      setSubmissionDate("");
+    } catch (error) {
+      console.error("Task add failed:", error);
+      Swal.fire({
+        icon: "error",
+        title: "Error",
+        text: "Task could not be assigned. Try again.",
+      });
+    }
   };
 
   const updateTask = async (id, updates) => {
-    if (!(await checkAdmin())) return; // Admin check
+    if (!isAdminMode) return;
 
     const updatedTasks = tasks.map((t) =>
       t.id === id ? { ...t, ...updates } : t
@@ -236,8 +299,7 @@ export default function DashboardPage() {
   };
 
   const deleteTask = async (taskId) => {
-    const isAdmin = await checkAdmin();
-    if (!isAdmin) return;
+    if (!isAdminMode) return;
 
     const confirm = await Swal.fire({
       title: "Are you sure?",
@@ -251,10 +313,8 @@ export default function DashboardPage() {
 
     if (!confirm.isConfirmed) return;
 
-    // 🔥 FIREBASE DELETE
     await deleteDoc(doc(db, "employees", selectedPerson.id, "tasks", taskId));
 
-    // 🔄 UI update
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     setFilteredTasks((prev) => prev.filter((t) => t.id !== taskId));
 
@@ -265,27 +325,64 @@ export default function DashboardPage() {
       showConfirmButton: false,
     });
   };
+  const isValidEmail = (email) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const deleteEmail = async (id) => {
+    if (!(await checkAdmin())) return;
+    await deleteDoc(doc(db, "emails", id));
+    setAllEmails((prev) => prev.filter((e) => e.id !== id));
+  };
 
   const deleteStudent = async (id) => {
-    const isAdmin = await checkAdmin();
-    if (!isAdmin) return;
+    if (!isAdminMode) return;
 
-    await deleteDoc(doc(db, "employees", id));
+    const confirm = await Swal.fire({
+      title: "Are you sure?",
+      text: "The employee and all of their tasks will be deleted!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#dc2626",
+      cancelButtonColor: "#6b7280",
+      confirmButtonText: "Yes, delete all",
+    });
 
-    const snapshot = await getDocs(collection(db, "employees"));
-    const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    setPeople(list);
+    if (!confirm.isConfirmed) return;
 
-    if (selectedPerson?.id === id) {
-      setSelectedPerson(list[0] || null);
-      setTasks([]);
+    try {
+      const tasksSnap = await getDocs(collection(db, "employees", id, "tasks"));
+      for (const taskDoc of tasksSnap.docs) {
+        await deleteDoc(doc(db, "employees", id, "tasks", taskDoc.id));
+      }
+
+      await deleteDoc(doc(db, "employees", id));
+      setPeople((prev) => prev.filter((p) => p.id !== id));
+
+      if (selectedPerson?.id === id) {
+        setSelectedPerson(null);
+        setTasks([]);
+        setFilteredTasks([]);
+      }
+
+      Swal.fire({
+        icon: "success",
+        title: "Employee & Tasks Deleted",
+        timer: 1200,
+        showConfirmButton: false,
+      });
+    } catch (error) {
+      console.error(error);
+      Swal.fire({
+        icon: "error",
+        title: "Delete Failed",
+        text: "Something went wrong",
+      });
     }
-
-    Swal.fire({ icon: "success", title: "Employee Deleted" });
   };
 
   const editStudent = async (id) => {
-    if (!(await checkAdmin())) return;
+    if (!isAdminMode) return;
 
     const { value: newName } = await Swal.fire({
       title: "Edit Employee Name",
@@ -327,6 +424,22 @@ export default function DashboardPage() {
       });
     }
   };
+  // Filter tasks
+  useEffect(() => {
+    if (!tasks || tasks.length === 0) return;
+
+    const filtered = tasks.filter((t) => {
+      const taskDate = new Date(t.submissionDate);
+      const from = fromDate ? new Date(fromDate) : null;
+      const to = toDate ? new Date(toDate) : null;
+
+      if (from && taskDate < from) return false;
+      if (to && taskDate > to) return false;
+      return true;
+    });
+
+    setFilteredTasks(filtered);
+  }, [tasks, fromDate, toDate]);
 
   const completed = tasks.filter((t) => t.completed && !t.late).length;
   const late = tasks.filter((t) => t.completed && t.late).length;
@@ -347,146 +460,185 @@ export default function DashboardPage() {
   ];
 
   function GaugePointer() {
-    const { valueAngle, outerRadius, cx, cy } = useGaugeState();
+  const { valueAngle, outerRadius, cx, cy } = useGaugeState();
 
-    if (valueAngle === null) {
-      // No value to display
-      return null;
-    }
+  if (valueAngle === null) return null;
 
-    const target = {
-      x: cx + outerRadius * Math.sin(valueAngle),
-      y: cy - outerRadius * Math.cos(valueAngle),
-    };
-    return (
-      <g>
-        <circle cx={cx} cy={cy} r={5} fill="red" />
-        <path
-          d={`M ${cx} ${cy} L ${target.x} ${target.y}`}
-          stroke="red"
-          strokeWidth={3}
-        />
-      </g>
-    );
-  }
+  const angleDeg = (valueAngle * 180) / Math.PI;
+
+  return (
+    <g
+      transform={`rotate(${angleDeg} ${cx} ${cy})`}
+    >
+      <animateTransform
+        attributeName="transform"
+        type="rotate"
+        from={`0 ${cx} ${cy}`}
+        to={`${angleDeg} ${cx} ${cy}`}
+        dur="0.7s"
+        fill="freeze"
+      />
+
+      <circle cx={cx} cy={cy} r={5} fill="red" />
+      <line
+        x1={cx}
+        y1={cy}
+        x2={cx}
+        y2={cy - outerRadius}
+        stroke="red"
+        strokeWidth={3}
+      />
+    </g>
+  );
+}
+
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-center text-gray-800">
           Employee Task Dashboard
         </h1>
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={handleAdminToggle}
+            className="bg-blue-600 text-white  px-4 py-2 rounded"
+          >
+            {isAdminMode ? "Disable Admin Mode" : "Enable Admin Mode"}
+          </button>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card title="Add Employee">
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <input
-                  className="border p-2 rounded w-full"
-                  placeholder="Employee name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-                <button
-                  onClick={addPerson}
-                  className="bg-blue-600 text-white px-4 rounded"
-                >
-                  Add
-                </button>
-              </div>
+        {isAdminMode && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card title="Add Employee">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    className="border p-2 rounded w-full"
+                    placeholder="Employee name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  <button
+                    onClick={addPerson}
+                    className="bg-blue-600 text-white px-4 rounded"
+                  >
+                    Add
+                  </button>
+                </div>
 
-              <div className="flex gap-2">
-                <input
-                  className="border p-2 rounded w-full"
-                  placeholder="Add email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                />
-                <button
-                  onClick={async () => {
-                    if (!newEmail.trim()) return;
+                <div className="flex gap-2">
+                  <input
+                    className="border p-2 rounded w-full"
+                    placeholder="Add email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                  />
+                  <button
+                    onClick={async () => {
+                      const email = newEmail.trim().toLowerCase();
 
-                    const isAdmin = await checkAdmin();
-                    if (!isAdmin) return;
+                      if (!email) {
+                        Swal.fire({
+                          icon: "error",
+                          title: "Email required",
+                          text: "Please enter an email address",
+                        });
+                        return;
+                      }
 
-                    if (emails.includes(newEmail)) {
-                      Swal.fire({
-                        icon: "error",
-                        title: "Email already exists",
+                      if (!isValidEmail(email)) {
+                        Swal.fire({
+                          icon: "error",
+                          title: "Invalid Email",
+                          text: "Please enter a valid email (example@gmail.com)",
+                        });
+                        return;
+                      }
+
+                      const alreadyExists = allEmails.some(
+                        (e) => e.email.toLowerCase() === email
+                      );
+
+                      if (alreadyExists) {
+                        Swal.fire({
+                          icon: "error",
+                          title: "Duplicate Email",
+                          text: "This email already exists",
+                        });
+                        return;
+                      }
+
+                      const isAdmin = await checkAdmin();
+                      if (!isAdmin) return;
+
+                      const ref = await addDoc(collection(db, "emails"), {
+                        email,
+                        createdAt: Date.now(),
                       });
-                      return;
-                    }
 
-                    const updatedEmails = [...emails, newEmail];
+                      setAllEmails((prev) => [...prev, { id: ref.id, email }]);
+                      setNewEmail("");
 
-                    await updateDoc(doc(db, "employees", selectedPerson.id), {
-                      emails: updatedEmails,
-                    });
-
-                    setEmails(updatedEmails);
-                    setSelectedPerson({
-                      ...selectedPerson,
-                      emails: updatedEmails,
-                    });
-
-                    setNewEmail("");
-
-                    Swal.fire({
-                      icon: "success",
-                      title: "Email Added",
-                    });
-                  }}
-                  className="bg-blue-600 text-white px-4 rounded"
-                >
-                  Mail
-                </button>
-              </div>
-            </div>
-          </Card>
-
-          {selectedPerson && (
-            <Card title={`Add Task • ${selectedPerson.name}`}>
-              <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
-                <input
-                  className="border p-2 rounded w-full"
-                  placeholder="Task name"
-                  value={taskName}
-                  onChange={(e) => setTaskName(e.target.value)}
-                />
-                <textarea
-                  className="border p-2 rounded w-full"
-                  placeholder="Description (optional)"
-                  value={taskDesc}
-                  onChange={(e) => setTaskDesc(e.target.value)}
-                />
-                <input
-                  type="date"
-                  className="border p-2 rounded w-full"
-                  value={submissionDate}
-                  onChange={(e) => setSubmissionDate(e.target.value)}
-                />
-                <select
-                  className="border p-2 rounded w-full"
-                  value={selectedEmail}
-                  onChange={(e) => setSelectedEmail(e.target.value)}
-                >
-                  <option value="">Select Email</option>
-                  {emails.map((email, i) => (
-                    <option key={i} value={email}>
-                      {email}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  onClick={addTask}
-                  className="bg-blue-600 text-white px-4 py-2 rounded w-full"
-                >
-                  Assign Task
-                </button>
+                      Swal.fire({
+                        icon: "success",
+                        title: "Email Added",
+                        timer: 1200,
+                        showConfirmButton: false,
+                      });
+                    }}
+                    className="bg-blue-600 text-white px-4 rounded"
+                  >
+                    Mail
+                  </button>
+                </div>
               </div>
             </Card>
-          )}
-        </div>
+
+            {selectedPerson && (
+              <Card title={`Add Task • ${selectedPerson.name}`}>
+                <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
+                  <input
+                    className="border p-2 rounded w-full"
+                    placeholder="Task name"
+                    value={taskName}
+                    onChange={(e) => setTaskName(e.target.value)}
+                  />
+                  <textarea
+                    className="border p-2 rounded w-full"
+                    placeholder="Description (optional)"
+                    value={taskDesc}
+                    onChange={(e) => setTaskDesc(e.target.value)}
+                  />
+                  <input
+                    type="date"
+                    className="border p-2 rounded w-full"
+                    value={submissionDate}
+                    onChange={(e) => setSubmissionDate(e.target.value)}
+                  />
+                  <select
+                    className="border p-2 rounded w-full"
+                    value={selectedEmail}
+                    onChange={(e) => setSelectedEmail(e.target.value)}
+                  >
+                    <option value="">Select Email</option>
+                    {allEmails.map((e, i) => (
+                      <option key={i} value={e.email}>
+                        {e.email}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={addTask}
+                    className="bg-blue-600 text-white px-4 py-2 rounded w-full"
+                  >
+                    Assign Task
+                  </button>
+                </div>
+              </Card>
+            )}
+          </div>
+        )}
 
         {selectedPerson && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -510,6 +662,7 @@ export default function DashboardPage() {
                   type="date"
                   value={fromDate}
                   onChange={(e) => setFromDate(e.target.value)}
+                  disabled={!isAdminMode}
                   className="w-full border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
         focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 />
@@ -518,6 +671,7 @@ export default function DashboardPage() {
                   type="date"
                   value={toDate}
                   onChange={(e) => setToDate(e.target.value)}
+                  disabled={!isAdminMode}
                   className="w-full border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
         focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 />
@@ -556,23 +710,21 @@ export default function DashboardPage() {
 
           {selectedPerson && (
             <Card title="Student Progress">
-              <div className="h-56 w-full flex items-center mt-[-30px] justify-center overflow-hidden">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={barData}
-                      dataKey="value"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={80} // size control
-                      paddingAngle={2}
-                    >
-                      <Cell fill="#16a34a" />
-                      <Cell fill="#facc15" />
-                      <Cell fill="#dc2626" />
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
+              <div className="h-52 w-full flex items-center mt-[-8px] justify-center overflow-hidden">
+                <MUIPieChart
+                  width={200}
+                  height={180}
+                  series={[
+                    {
+                      data: [
+                        { id: 0, value: completed, label: "Completed" },
+                        { id: 1, value: late, label: "Late" },
+                        { id: 2, value: pending, label: "Pending" },
+                      ],
+                    },
+                  ]}
+                  colors={["#16a34a", "#facc15", "#dc2626"]} // green, yellow, red
+                />
               </div>
             </Card>
           )}
@@ -595,7 +747,11 @@ export default function DashboardPage() {
                   >
                     <span className="flex-1">{p.name}</span>
 
-                    <div className="flex gap-2">
+                    <div
+                      className={`flex gap-2 ${
+                        !isAdminMode ? "pointer-events-none opacity-50" : ""
+                      }`}
+                    >
                       <FiEdit2
                         onClick={(e) => {
                           e.stopPropagation();
@@ -682,6 +838,7 @@ export default function DashboardPage() {
                         <div className="flex items-center mt-2 gap-2">
                           {!t.completed && (
                             <select
+                              disabled={!isAdminMode}
                               className="border p-1 rounded text-sm"
                               defaultValue=""
                               onChange={(e) => {
@@ -710,8 +867,13 @@ export default function DashboardPage() {
                           )}
 
                           <button
+                            disabled={!isAdminMode}
                             onClick={() => deleteTask(t.id)}
-                            className="ml-auto text-red-600"
+                            className={`ml-auto text-red-600 ${
+                              !isAdminMode
+                                ? "opacity-50 cursor-not-allowed"
+                                : "hover:text-red-800"
+                            }`}
                           >
                             <FiTrash2 />
                           </button>
