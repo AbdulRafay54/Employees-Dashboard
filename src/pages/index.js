@@ -182,9 +182,16 @@ export default function DashboardPage() {
     !t.completed && new Date(t.submissionDate) < new Date();
 
   const addPerson = async () => {
-    if (!(await checkAdmin())) return;
-    if (!name.trim()) return;
+    if (!isAdminMode) {
+      Swal.fire({
+        icon: "error",
+        title: "Admin mode required",
+        text: "Please enable admin mode first",
+      });
+      return;
+    }
 
+    if (!name.trim()) return;
     const cleanName = name.trim();
     const lowerName = cleanName.toLowerCase();
 
