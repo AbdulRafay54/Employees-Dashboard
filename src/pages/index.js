@@ -53,6 +53,7 @@ export default function DashboardPage() {
   const [toDate, setToDate] = useState("");
   const [filteredTasks, setFilteredTasks] = useState([]);
   const [allEmails, setAllEmails] = useState([]);
+  const [emailOpen, setEmailOpen] = useState(false);
 
   useEffect(() => {
     const fetchEmployees = async () => {
@@ -237,7 +238,7 @@ export default function DashboardPage() {
   const addTask = async () => {
     if (!taskName || !submissionDate) return;
 
-    if (!isAdmin) return;
+    if (!isAdminMode) return;
 
     try {
       const ref = await addDoc(
@@ -286,6 +287,25 @@ export default function DashboardPage() {
     }
   };
 
+  const getTaskScore = (task) => {
+    const today = new Date();
+    const due = new Date(task.submissionDate);
+
+    if (!task.completed) return 0;
+
+    const diffDays = Math.ceil((today - due) / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) return 100; // on time
+    if (diffDays <= 20) return 80; // within 20 days late
+    return 70; // very late
+  };
+
+  function getGaugeColor(score) {
+    if (score === 100) return "#16a34a"; // Green
+    if (score >= 80) return "#facc15"; // Yellow
+    return "#dc2626"; // Red
+  }
+
   const updateTask = async (id, updates) => {
     if (!isAdminMode) return;
 
@@ -329,10 +349,83 @@ export default function DashboardPage() {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
-  const deleteEmail = async (id) => {
-    if (!(await checkAdmin())) return;
-    await deleteDoc(doc(db, "emails", id));
-    setAllEmails((prev) => prev.filter((e) => e.id !== id));
+  const editEmail = async (emailObj) => {
+    if (!isAdminMode) return;
+
+    const { value } = await Swal.fire({
+      title: "Edit Email",
+      input: "email",
+      inputValue: emailObj.email,
+      showCancelButton: true,
+    });
+
+    if (!value) return;
+
+    const clean = value.trim().toLowerCase();
+
+    if (!isValidEmail(clean)) {
+      Swal.fire({ icon: "error", title: "Invalid Email" });
+      return;
+    }
+
+    const duplicate = allEmails.some(
+      (e) => e.email === clean && e.id !== emailObj.id
+    );
+
+    if (duplicate) {
+      Swal.fire({
+        icon: "error",
+        title: "Duplicate Email",
+      });
+      return;
+    }
+
+    await updateDoc(doc(db, "emails", emailObj.id), {
+      email: clean,
+    });
+
+    setAllEmails((prev) =>
+      prev.map((e) => (e.id === emailObj.id ? { ...e, email: clean } : e))
+    );
+
+    if (selectedEmail === emailObj.email) {
+      setSelectedEmail(clean);
+    }
+
+    Swal.fire({
+      icon: "success",
+      title: "Email Updated",
+      timer: 1000,
+      showConfirmButton: false,
+    });
+  };
+  const deleteEmailConfirm = async (emailObj) => {
+    if (!isAdminMode) return;
+
+    const res = await Swal.fire({
+      title: "Delete Email?",
+      text: emailObj.email,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#dc2626",
+    });
+
+    if (!res.isConfirmed) return;
+
+    await deleteDoc(doc(db, "emails", emailObj.id));
+
+    setAllEmails((prev) => prev.filter((e) => e.id !== emailObj.id));
+
+    if (selectedEmail === emailObj.email) {
+      setSelectedEmail("");
+    }
+
+    Swal.fire({
+      icon: "success",
+      title: "Email Deleted",
+      timer: 1000,
+      showConfirmButton: false,
+    });
   };
 
   const deleteStudent = async (id) => {
@@ -452,7 +545,11 @@ export default function DashboardPage() {
   ];
 
   const progressPercent =
-    tasks.length === 0 ? 0 : Math.round((completed / tasks.length) * 100);
+    tasks.length === 0
+      ? 0
+      : Math.round(
+          tasks.reduce((acc, t) => acc + getTaskScore(t), 0) / tasks.length
+        );
 
   const meterData = [
     { name: "Progress", value: progressPercent },
@@ -460,37 +557,31 @@ export default function DashboardPage() {
   ];
 
   function GaugePointer() {
-  const { valueAngle, outerRadius, cx, cy } = useGaugeState();
+    const { valueAngle, outerRadius, cx, cy } = useGaugeState();
 
-  if (valueAngle === null) return null;
+    if (valueAngle === null) return null;
 
-  const angleDeg = (valueAngle * 180) / Math.PI;
+    const angleDeg = (valueAngle * 180) / Math.PI;
 
-  return (
-    <g
-      transform={`rotate(${angleDeg} ${cx} ${cy})`}
-    >
-      <animateTransform
-        attributeName="transform"
-        type="rotate"
-        from={`0 ${cx} ${cy}`}
-        to={`${angleDeg} ${cx} ${cy}`}
-        dur="0.7s"
-        fill="freeze"
-      />
-
-      <circle cx={cx} cy={cy} r={5} fill="red" />
-      <line
-        x1={cx}
-        y1={cy}
-        x2={cx}
-        y2={cy - outerRadius}
-        stroke="red"
-        strokeWidth={3}
-      />
-    </g>
-  );
-}
+    return (
+      <g>
+        <line
+          x1={cx}
+          y1={cy}
+          x2={cx}
+          y2={cy - outerRadius}
+          stroke="red"
+          strokeWidth={3}
+          style={{
+            transformOrigin: `${cx}px ${cy}px`,
+            transform: `rotate(${angleDeg}deg)`,
+            transition: "transform 1s ease-out",
+          }}
+        />
+        <circle cx={cx} cy={cy} r={5} fill="red" />
+      </g>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
@@ -537,6 +628,17 @@ export default function DashboardPage() {
                     onClick={async () => {
                       const email = newEmail.trim().toLowerCase();
 
+                      // 🔒 Admin mode check (NO PIN POPUP)
+                      if (!isAdminMode) {
+                        Swal.fire({
+                          icon: "error",
+                          title: "Admin mode required",
+                          text: "Please enable admin mode first",
+                        });
+                        return;
+                      }
+
+                      // ❌ Empty
                       if (!email) {
                         Swal.fire({
                           icon: "error",
@@ -546,6 +648,7 @@ export default function DashboardPage() {
                         return;
                       }
 
+                      // ❌ Invalid
                       if (!isValidEmail(email)) {
                         Swal.fire({
                           icon: "error",
@@ -555,8 +658,11 @@ export default function DashboardPage() {
                         return;
                       }
 
-                      const alreadyExists = allEmails.some(
-                        (e) => e.email.toLowerCase() === email
+                      // 🔥 STRICT DUPLICATE CHECK (Firestore)
+                      const snap = await getDocs(collection(db, "emails"));
+
+                      const alreadyExists = snap.docs.some(
+                        (doc) => doc.data().email.toLowerCase() === email
                       );
 
                       if (alreadyExists) {
@@ -568,9 +674,7 @@ export default function DashboardPage() {
                         return;
                       }
 
-                      const isAdmin = await checkAdmin();
-                      if (!isAdmin) return;
-
+                      // ✅ Add email
                       const ref = await addDoc(collection(db, "emails"), {
                         email,
                         createdAt: Date.now(),
@@ -615,18 +719,68 @@ export default function DashboardPage() {
                     value={submissionDate}
                     onChange={(e) => setSubmissionDate(e.target.value)}
                   />
-                  <select
-                    className="border p-2 rounded w-full"
-                    value={selectedEmail}
-                    onChange={(e) => setSelectedEmail(e.target.value)}
-                  >
-                    <option value="">Select Email</option>
-                    {allEmails.map((e, i) => (
-                      <option key={i} value={e.email}>
-                        {e.email}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative w-full">
+                    {/* SELECT BOX */}
+                    <button
+                      type="button"
+                      onClick={() => setEmailOpen((p) => !p)}
+                      className="border p-2 rounded w-full bg-white text-left"
+                    >
+                      {selectedEmail || "Select Email"}
+                    </button>
+
+                    {/* DROPDOWN */}
+                    {emailOpen && (
+                      <div className="absolute z-30 mt-1 w-full bg-white border rounded shadow max-h-52 overflow-auto">
+                        {allEmails.length === 0 && (
+                          <p className="p-2 text-sm text-gray-500">No emails</p>
+                        )}
+
+                        {allEmails.map((e) => (
+                          <div
+                            key={e.id}
+                            className="flex items-center justify-between px-2 py-1 hover:bg-gray-100"
+                          >
+                            {/* SELECT */}
+                            <span
+                              onClick={() => {
+                                setSelectedEmail(e.email);
+                                setEmailOpen(false);
+                              }}
+                              className="cursor-pointer text-sm"
+                            >
+                              {e.email}
+                            </span>
+
+                            {/* ACTIONS */}
+                            {isAdminMode && (
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    editEmail(e);
+                                  }}
+                                  className="text-blue-600 text-sm"
+                                >
+                                  <FiEdit2 />
+                                </button>
+
+                                <button
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    deleteEmailConfirm(e);
+                                  }}
+                                  className="text-red-600 text-sm"
+                                >
+                                  <FiTrash2 />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   <button
                     onClick={addTask}
@@ -662,7 +816,6 @@ export default function DashboardPage() {
                   type="date"
                   value={fromDate}
                   onChange={(e) => setFromDate(e.target.value)}
-                  disabled={!isAdminMode}
                   className="w-full border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
         focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 />
@@ -671,7 +824,6 @@ export default function DashboardPage() {
                   type="date"
                   value={toDate}
                   onChange={(e) => setToDate(e.target.value)}
-                  disabled={!isAdminMode}
                   className="w-full border border-gray-300 bg-white px-3 py-2 rounded-md text-sm
         focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 />
@@ -684,20 +836,30 @@ export default function DashboardPage() {
                   height={140}
                   startAngle={-90}
                   endAngle={90}
-                  value={progressPercent}
+                  value={progressPercent} // percentage se needle move karega
                 >
-                  <GaugeReferenceArc
-                    style={{
-                      fill: "#e5e7eb",
-                    }}
-                  />
-                  <GaugeValueArc
-                    style={{
-                      fill: "#22c55e",
-                    }}
-                  />
+                  <defs>
+                    <linearGradient
+                      id="gaugeGradient"
+                      x1="0%"
+                      y1="0%"
+                      x2="100%"
+                      y2="0%"
+                    >
+                      <stop offset="0%" stopColor="#dc2626" /> {/* Red */}
+                      <stop offset="25%" stopColor="#f97316" /> {/* Orange */}
+                      <stop offset="50%" stopColor="#facc15" /> {/* Yellow */}
+                      <stop offset="75%" stopColor="#a3e635" />{" "}
+                      {/* Light Green */}
+                      <stop offset="100%" stopColor="#16a34a" /> {/* Green */}
+                    </linearGradient>
+                  </defs>
+
+                  <GaugeReferenceArc style={{ fill: "#e5e7eb" }} />
+                  <GaugeValueArc style={{ fill: "url(#gaugeGradient)" }} />
                   <GaugePointer />
                 </GaugeContainer>
+
                 <div className="absolute bottom-8 text-center">
                   <p className="text-3xl font-bold text-gray-800">
                     {progressPercent}%
