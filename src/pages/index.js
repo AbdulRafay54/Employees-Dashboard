@@ -32,7 +32,7 @@ import {
 } from "@mui/x-charts/Gauge";
 import { PieChart as MUIPieChart } from "@mui/x-charts/PieChart";
 
-const adminPin = "1234";
+const adminPin = "Gsat321";
 
 export default function DashboardPage() {
   const [isAdminMode, setIsAdminMode] = useState(false);
