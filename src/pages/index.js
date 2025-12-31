@@ -303,8 +303,11 @@ export default function DashboardPage() {
     const diffDays = Math.ceil((today - due) / (1000 * 60 * 60 * 24));
 
     if (diffDays <= 0) return 100; // on time
-    if (diffDays <= 20) return 80; // within 20 days late
-    return 70; // very late
+    if (diffDays <= 10) return 80; // 1–10 days late
+    if (diffDays <= 20) return 60; // 11–20 days late
+    if (diffDays <= 30) return 40; // 21–30 days late
+
+    return 40; // 30+ days late
   };
 
   function getGaugeColor(score) {
@@ -545,6 +548,8 @@ export default function DashboardPage() {
   const late = tasks.filter((t) => t.completed && t.late).length;
   const pending = tasks.filter((t) => !t.completed).length;
 
+  const total = completed + late + pending;
+
   const barData = [
     { name: "Completed", value: completed },
     { name: "Late", value: late },
@@ -635,7 +640,6 @@ export default function DashboardPage() {
                     onClick={async () => {
                       const email = newEmail.trim().toLowerCase();
 
-                      // 🔒 Admin mode check (NO PIN POPUP)
                       if (!isAdminMode) {
                         Swal.fire({
                           icon: "error",
@@ -645,7 +649,6 @@ export default function DashboardPage() {
                         return;
                       }
 
-                      // ❌ Empty
                       if (!email) {
                         Swal.fire({
                           icon: "error",
@@ -655,7 +658,6 @@ export default function DashboardPage() {
                         return;
                       }
 
-                      // ❌ Invalid
                       if (!isValidEmail(email)) {
                         Swal.fire({
                           icon: "error",
@@ -665,7 +667,6 @@ export default function DashboardPage() {
                         return;
                       }
 
-                      // 🔥 STRICT DUPLICATE CHECK (Firestore)
                       const snap = await getDocs(collection(db, "emails"));
 
                       const alreadyExists = snap.docs.some(
@@ -681,7 +682,6 @@ export default function DashboardPage() {
                         return;
                       }
 
-                      // ✅ Add email
                       const ref = await addDoc(collection(db, "emails"), {
                         email,
                         createdAt: Date.now(),
@@ -810,7 +810,11 @@ export default function DashboardPage() {
               color="text-green-600"
             />
             <StatBox title="Pending" value={pending} color="text-red-600" />
-            <StatBox title="Late" value={late} color="text-yellow-600" />
+            <StatBox
+              title="Late Completed"
+              value={late}
+              color="text-yellow-600"
+            />
           </div>
         )}
 
@@ -878,7 +882,7 @@ export default function DashboardPage() {
           </Card>
 
           {selectedPerson && (
-            <Card title="Student Progress">
+            <Card title="Employee Progress">
               <div className="h-52 w-full flex items-center mt-[-8px] justify-center overflow-hidden">
                 <MUIPieChart
                   width={200}
@@ -890,9 +894,21 @@ export default function DashboardPage() {
                         { id: 1, value: late, label: "Late" },
                         { id: 2, value: pending, label: "Pending" },
                       ],
+                      arcLabel: (item) =>
+                        total
+                          ? `${Math.round((item.value / total) * 100)}%`
+                          : "0%",
+                      arcLabelMinAngle: 15,
                     },
                   ]}
-                  colors={["#16a34a", "#facc15", "#dc2626"]} // green, yellow, red
+                  colors={["#16a34a", "#facc15", "#dc2626"]}
+                  sx={{
+                    "& .MuiPieArcLabel-root": {
+                      fill: "#fff", // white text
+                      fontSize: "19px", // readable
+                      fontWeight: "600", // thora bold
+                    },
+                  }}
                 />
               </div>
             </Card>
