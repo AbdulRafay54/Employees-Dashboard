@@ -178,8 +178,14 @@ export default function DashboardPage() {
     }
   };
 
-  const isExpired = (t) =>
-    !t.completed && new Date(t.submissionDate) < new Date();
+  const isExpired = (t) => {
+  if (t.completed) return false;
+
+  const due = new Date(t.submissionDate);
+  due.setHours(23, 59, 59, 999); // aaj raat 12 baje tak valid
+
+  return new Date() > due;
+};
 
   const addPerson = async () => {
     if (!isAdminMode) {
