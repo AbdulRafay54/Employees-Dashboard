@@ -179,13 +179,13 @@ export default function DashboardPage() {
   };
 
   const isExpired = (t) => {
-  if (t.completed) return false;
+    if (t.completed) return false;
 
-  const due = new Date(t.submissionDate);
-  due.setHours(23, 59, 59, 999); // aaj raat 12 baje tak valid
+    const due = new Date(t.submissionDate);
+    due.setHours(23, 59, 59, 999); // aaj raat 12 baje tak valid
 
-  return new Date() > due;
-};
+    return new Date() > due;
+  };
 
   const addPerson = async () => {
     if (!isAdminMode) {
@@ -300,21 +300,32 @@ export default function DashboardPage() {
     }
   };
 
-  const getTaskScore = (task) => {
-    const today = new Date();
-    const due = new Date(task.submissionDate);
+ const getTaskScore = (task) => {
+  if (!task.completed) return 0;
 
-    if (!task.completed) return 0;
+  const due = new Date(task.submissionDate);
 
-    const diffDays = Math.ceil((today - due) / (1000 * 60 * 60 * 24));
+  // 🔹 Old task handling
+  if (!task.completedAt) {
+    if (task.late) return 80; // old late → default 80
+    return 100; // old on-time
+  }
 
-    if (diffDays <= 0) return 100; // on time
-    if (diffDays <= 10) return 80; // 1–10 days late
-    if (diffDays <= 20) return 60; // 11–20 days late
-    if (diffDays <= 30) return 40; // 21–30 days late
+  const completedAt = new Date(task.completedAt);
 
-    return 40; // 30+ days late
-  };
+  const diffDays = Math.ceil(
+    (completedAt - due) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays <= 0) return 100;
+  if (diffDays <= 10) return 80;
+  if (diffDays <= 20) return 60;
+  if (diffDays <= 30) return 40;
+
+  return 40;
+};
+
+
 
   function getGaugeColor(score) {
     if (score === 100) return "#16a34a"; // Green
@@ -1037,12 +1048,14 @@ export default function DashboardPage() {
                                   updateTask(t.id, {
                                     completed: true,
                                     late: false,
+                                    completedAt: Date.now(),
                                   });
                                 }
                                 if (e.target.value === "late") {
                                   updateTask(t.id, {
                                     completed: true,
                                     late: true,
+                                    completedAt: Date.now(), 
                                   });
                                 }
                               }}
