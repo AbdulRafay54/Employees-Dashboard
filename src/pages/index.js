@@ -300,38 +300,52 @@ export default function DashboardPage() {
     }
   };
 
- const getTaskScore = (task) => {
-  if (!task.completed) return 0;
+  const getTaskScore = (task) => {
+    if (!task.completed) return 0;
 
-  const due = new Date(task.submissionDate);
+    const due = new Date(task.submissionDate);
 
-  // 🔹 Old task handling
-  if (!task.completedAt) {
-    if (task.late) return 80; // old late → default 80
-    return 100; // old on-time
-  }
+    // 🔹 Old task handling
+    if (!task.completedAt) {
+      if (task.late) return 80; // old late → default 80
+      return 100; // old on-time
+    }
 
-  const completedAt = new Date(task.completedAt);
+    const completedAt = new Date(task.completedAt);
 
-  const diffDays = Math.ceil(
-    (completedAt - due) / (1000 * 60 * 60 * 24)
-  );
+    const diffDays = Math.ceil((completedAt - due) / (1000 * 60 * 60 * 24));
 
-  if (diffDays <= 0) return 100;
-  if (diffDays <= 10) return 80;
-  if (diffDays <= 20) return 60;
-  if (diffDays <= 30) return 40;
+    if (diffDays <= 0) return 100;
+    if (diffDays <= 10) return 80;
+    if (diffDays <= 20) return 60;
+    if (diffDays <= 30) return 40;
 
-  return 40;
-};
-
-
+    return 40;
+  };
 
   function getGaugeColor(score) {
     if (score === 100) return "#16a34a"; // Green
     if (score >= 80) return "#facc15"; // Yellow
     return "#dc2626"; // Red
   }
+
+ const formatDate = (ts) => {
+  if (!ts) return "N/A";
+
+  const date =
+    typeof ts === "number"
+      ? new Date(ts)
+      : ts.seconds
+      ? new Date(ts.seconds * 1000)
+      : new Date(ts);
+
+  const d = date.getDate();
+  const m = date.getMonth() + 1;
+  const y = date.getFullYear();
+
+  return `${d}-${m}-${y}`;
+};
+
 
   const updateTask = async (id, updates) => {
     if (!isAdminMode) return;
@@ -1014,8 +1028,13 @@ export default function DashboardPage() {
                       <div key={t.id} className="border p-3 rounded">
                         <p className="font-medium">{t.name}</p>
                         <p className="text-sm text-gray-500">
+                          Assigned: {formatDate(t.createdAt)}
+                        </p>
+
+                        <p className="text-sm text-gray-500">
                           Due: {t.submissionDate}
                         </p>
+
                         <p
                           className={`text-sm font-medium mt-1 ${
                             t.completed
@@ -1055,7 +1074,7 @@ export default function DashboardPage() {
                                   updateTask(t.id, {
                                     completed: true,
                                     late: true,
-                                    completedAt: Date.now(), 
+                                    completedAt: Date.now(),
                                   });
                                 }
                               }}
