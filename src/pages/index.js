@@ -329,23 +329,22 @@ export default function DashboardPage() {
     return "#dc2626"; // Red
   }
 
- const formatDate = (ts) => {
-  if (!ts) return "N/A";
+  const formatDate = (ts) => {
+    if (!ts) return "N/A";
 
-  const date =
-    typeof ts === "number"
-      ? new Date(ts)
-      : ts.seconds
-      ? new Date(ts.seconds * 1000)
-      : new Date(ts);
+    const date =
+      typeof ts === "number"
+        ? new Date(ts)
+        : ts.seconds
+        ? new Date(ts.seconds * 1000)
+        : new Date(ts);
 
-  const d = date.getDate();
-  const m = date.getMonth() + 1;
-  const y = date.getFullYear();
+    const d = date.getDate();
+    const m = date.getMonth() + 1;
+    const y = date.getFullYear();
 
-  return `${d}-${m}-${y}`;
-};
-
+    return `${d}-${m}-${y}`;
+  };
 
   const updateTask = async (id, updates) => {
     if (!isAdminMode) return;
@@ -576,10 +575,14 @@ export default function DashboardPage() {
   }, [tasks, fromDate, toDate]);
 
   const completed = tasks.filter((t) => t.completed && !t.late).length;
-  const late = tasks.filter((t) => t.completed && t.late).length;
-  const pending = tasks.filter((t) => !t.completed).length;
 
-  const total = completed + late + pending;
+  const late = tasks.filter((t) => t.completed && t.late).length;
+
+  const missed = tasks.filter((t) => !t.completed && isExpired(t)).length;
+
+  const pending = tasks.filter((t) => !t.completed && !isExpired(t)).length;
+
+  const total = completed + late + pending + missed;
 
   const barData = [
     { name: "Completed", value: completed },
@@ -833,7 +836,7 @@ export default function DashboardPage() {
         )}
 
         {selectedPerson && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
             <StatBox title="Total Tasks" value={tasks.length} />
             <StatBox
               title="Completed"
@@ -845,6 +848,11 @@ export default function DashboardPage() {
               title="Late Completed"
               value={late}
               color="text-yellow-600"
+            />
+            <StatBox
+              title="Deadline Missed"
+              value={missed}
+              color="text-red-600"
             />
           </div>
         )}
